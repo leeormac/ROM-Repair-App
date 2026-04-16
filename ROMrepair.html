@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ROMrepair — Property Maintenance Dispatch</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    button:hover { opacity: 0.88; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+    table { width: 100%; border-collapse: collapse; }
+    tr:hover { background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useState, useCallback, useMemo } = React;
+
+    // ─── Mock Data ───────────────────────────────────────────────────────────────
+
+    const PROPERTIES = [
+      { id: "p1", name: "Harold", address: "1420 Vine St, Hollywood", units: 48, manager: "pm1" },
+      { id: "p2", name: "Carlton", address: "8800 Sunset Blvd, WeHo", units: 32, manager: "pm1" },
+      { id: "p3", name: "Franklin", address: "1530 Echo Park Ave", units: 24, manager: "pm2" },
+      { id: "p4", name: "Russell", address: "2900 Rowena Ave", units: 36, manager: "pm2" },
+      { id: "p5", name: "Harvard", address: "600 S Spring St", units: 60, manager: "pm3" },
+    ];
+
+    const TECHS = [
+      { id: "t1", name: "Jerry", specialty: "Plumbing", status: "available", location: "Hollywood", phone: "310-555-0101", activeJobs: 2, capacity: 5 },
+      { id: "t2", name: "Jaime", specialty: "Electrical", status: "on-job", location: "WeHo", phone: "310-555-0102", activeJobs: 4, capacity: 5 },
+      { id: "t3", name: "Marlon", specialty: "HVAC", status: "on-job", location: "Echo Park", phone: "310-555-0103", activeJobs: 3, capacity: 5 },
+      { id: "t4", name: "Omar", specialty: "General", status: "available", location: "Silver Lake", phone: "310-555-0104", activeJobs: 1, capacity: 5 },
+      { id: "t5", name: "Wilson", specialty: "Plumbing", status: "en-route", location: "DTLA", phone: "310-555-0105", activeJobs: 3, capacity: 5 },
+      { id: "t6", name: "Jose", specialty: "Electrical", status: "on-job", location: "Hollywood", phone: "310-555-0106", activeJobs: 5, capacity: 5 },
+      { id: "t7", name: "Alex", specialty: "Appliance", status: "available", location: "WeHo", phone: "310-555-0107", activeJobs: 2, capacity: 5 },
+      { id: "t8", name: "Roberto", specialty: "General", status: "on-job", location: "Echo Park", phone: "310-555-0108", activeJobs: 4, capacity: 5 },
+    ];
+
+    const SUB_TRADE_TYPES = ["Paint", "Flooring", "Tile", "Plumbing", "Electrical", "Cabinetry", "Stone", "Rent-Ready", "Cleaning"];
+    const CATEGORIES = ["Plumbing", "Electrical", "HVAC", "Appliance", "General"];
+    const STATUSES = ["Unassigned", "Assigned", "In Progress", "Completed", "Needs Review", "Closed", "Archived"];
+    const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
+
+    const now = Date.now();
+    const day = 86400000;
+
+    const initialWorkOrders = [
+      { id: "WO-1001", type: "repair", propertyId: "p1", unit: "204", category: "Plumbing", description: "Kitchen sink leaking under cabinet. Water pooling on floor.", urgency: true, status: "Unassigned", priority: "High", techId: null, tenantId: "tenant1", tenantName: "Sarah Chen", created: now - 2 * day, updated: now - 2 * day, communications: [], notes: "", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-1002", type: "repair", propertyId: "p1", unit: "118", category: "Electrical", description: "Bathroom outlet sparking when plugging in hair dryer.", urgency: true, status: "Assigned", priority: "Urgent", techId: "t2", tenantId: "tenant2", tenantName: "Mike Torres", created: now - 3 * day, updated: now - 1 * day, communications: [{ id: "c1", type: "sms", to: "tenant", msg: "Your repair request has been assigned to Jaime.", time: now - 1 * day }], notes: "", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-1003", type: "repair", propertyId: "p2", unit: "305", category: "HVAC", description: "AC not cooling. Thermostat shows 82°F, set to 72°F.", urgency: false, status: "In Progress", priority: "Medium", techId: "t3", tenantId: "tenant3", tenantName: "Lisa Park", created: now - 5 * day, updated: now - 0.5 * day, communications: [{ id: "c2", type: "sms", to: "tenant", msg: "Work has started on your AC repair.", time: now - 0.5 * day }, { id: "c3", type: "email", to: "pm", msg: "Work started: WO-1003 Unit 305 HVAC", time: now - 0.5 * day }], notes: "Checked refrigerant levels — low. Ordering R-410A.", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-1004", type: "repair", propertyId: "p3", unit: "102", category: "Appliance", description: "Dishwasher not draining after cycle completes.", urgency: false, status: "Needs Review", priority: "Medium", techId: "t7", tenantId: "tenant4", tenantName: "James Wright", created: now - 7 * day, updated: now - 0.2 * day, communications: [], notes: "Drain pump may need replacement. Unit is 8+ years old — recommend full replacement.", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-1005", type: "repair", propertyId: "p5", unit: "1201", category: "General", description: "Front door deadbolt sticking, hard to lock.", urgency: false, status: "Completed", priority: "Low", techId: "t4", tenantId: "tenant5", tenantName: "Amy Nguyen", created: now - 14 * day, updated: now - 1 * day, communications: [{ id: "c4", type: "sms", to: "tenant", msg: "Your repair is complete!", time: now - 1 * day }], notes: "", completionNotes: "Replaced deadbolt cylinder. Tested — smooth operation.", closedBy: null, closedNote: "" },
+      { id: "WO-1006", type: "repair", propertyId: "p4", unit: "210", category: "Plumbing", description: "Toilet running continuously.", urgency: false, status: "Assigned", priority: "Low", techId: "t1", tenantId: "tenant6", tenantName: "Tom Bradley", created: now - 1 * day, updated: now - 0.5 * day, communications: [], notes: "", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-1007", type: "renovation", propertyId: "p1", unit: "315", description: "Full unit renovation — prior tenant move-out.", urgency: false, status: "In Progress", priority: "High", techId: null, tenantId: null, tenantName: null, category: "Renovation", created: now - 10 * day, updated: now - 0.1 * day, communications: [], notes: "Target completion: 2 weeks", completionNotes: "", closedBy: null, closedNote: "",
+        subTrades: [
+          { id: "st1", trade: "Paint", status: "Completed", techId: "t4", notes: "Walls + ceiling done. SW Alabaster." },
+          { id: "st2", trade: "Flooring", status: "In Progress", techId: "t8", notes: "LVP install in progress — bedroom done, living room next." },
+          { id: "st3", trade: "Plumbing", status: "Assigned", techId: "t1", notes: "Replace kitchen faucet + garbage disposal." },
+          { id: "st4", trade: "Electrical", status: "Unassigned", techId: null, notes: "Update outlets to GFCI in kitchen/bath." },
+          { id: "st5", trade: "Cleaning", status: "Unassigned", techId: null, notes: "Final deep clean after all trades." },
+        ]
+      },
+      { id: "WO-1008", type: "renovation", propertyId: "p3", unit: "108", description: "Kitchen remodel — new cabinets, counters, backsplash.", urgency: false, status: "Assigned", priority: "Medium", techId: null, tenantId: null, tenantName: null, category: "Renovation", created: now - 4 * day, updated: now - 2 * day, communications: [], notes: "", completionNotes: "", closedBy: null, closedNote: "",
+        subTrades: [
+          { id: "st6", trade: "Cabinetry", status: "Assigned", techId: "t4", notes: "Shaker style, white." },
+          { id: "st7", trade: "Stone", status: "Unassigned", techId: null, notes: "Quartz countertops — color TBD." },
+          { id: "st8", trade: "Tile", status: "Unassigned", techId: null, notes: "Subway tile backsplash." },
+          { id: "st9", trade: "Plumbing", status: "Unassigned", techId: null, notes: "Reconnect sink after counters." },
+        ]
+      },
+      { id: "WO-1009", type: "repair", propertyId: "p2", unit: "112", category: "General", description: "Closet door off track.", urgency: false, status: "Completed", priority: "Low", techId: "t4", tenantId: "tenant7", tenantName: "Rachel Adams", created: now - 20 * day, updated: now - 6 * day, communications: [], notes: "", completionNotes: "Realigned sliding door track. Replaced worn rollers.", closedBy: null, closedNote: "" },
+      { id: "WO-1010", type: "repair", propertyId: "p5", unit: "803", category: "Electrical", description: "Living room ceiling fan wobbling dangerously.", urgency: true, status: "Unassigned", priority: "Urgent", techId: null, tenantId: "tenant8", tenantName: "Derek Holmes", created: now - 0.1 * day, updated: now - 0.1 * day, communications: [], notes: "", completionNotes: "", closedBy: null, closedNote: "" },
+      { id: "WO-0990", type: "repair", propertyId: "p1", unit: "410", category: "Plumbing", description: "Bathtub drain clogged.", urgency: false, status: "Archived", priority: "Low", techId: "t1", tenantId: "tenant9", tenantName: "Kelly Tran", created: now - 45 * day, updated: now - 32 * day, communications: [], notes: "", completionNotes: "Snaked drain. Hair clog removed.", closedBy: null, closedNote: "", createdBy: "Manni", dispatchedBy: "Manni", arrivedAt: now - 44 * day, completedAt: now - 32 * day, photos: [] },
+      { id: "WO-0991", type: "repair", propertyId: "p4", unit: "301", category: "HVAC", description: "Heater making loud banging noise.", urgency: false, status: "Closed", priority: "Medium", techId: "t3", tenantId: "tenant10", tenantName: "Brian Lee", created: now - 40 * day, updated: now - 35 * day, communications: [], notes: "", completionNotes: "Replaced blower motor bearing.", closedBy: "Dispatcher (Manni)", closedNote: "Confirmed repair. Tenant satisfied. Closing out.", createdBy: "Kelli", dispatchedBy: "Kelli", arrivedAt: now - 38 * day, completedAt: now - 35 * day, photos: [] },
+    ];
+
+    // Normalize legacy single techId → techIds array for all WOs
+    initialWorkOrders.forEach((wo) => { if (!wo.techIds) wo.techIds = wo.techId ? [wo.techId] : []; });
+
+    const USERS = [
+      { id: "admin1", name: "Orly", role: "admin", email: "orly@romrepair.com" },
+      { id: "dispatch1", name: "Manni", role: "dispatcher", email: "manni@romrepair.com" },
+      { id: "dispatch2", name: "Kelli", role: "dispatcher", email: "kelli@romrepair.com" },
+      { id: "pm1", name: "Nicole Foster", role: "pm", email: "nicole@romrepair.com", properties: ["p1", "p2"] },
+      { id: "pm2", name: "Greg Yamada", role: "pm", email: "greg@romrepair.com", properties: ["p3", "p4"] },
+      { id: "pm3", name: "Diana Ruiz", role: "pm", email: "diana@romrepair.com", properties: ["p5"] },
+      { id: "t1", name: "Jerry", role: "tech", techId: "t1" },
+      { id: "tenant1", name: "Sarah Chen", role: "tenant", unit: "204", propertyId: "p1", phone: "310-555-1001", email: "sarah@email.com" },
+    ];
+
+    // ─── Utilities ───────────────────────────────────────────────────────────────
+
+    const fmt = (ts) => {
+      if (!ts) return "—";
+      const d = new Date(ts);
+      const mo = d.toLocaleString("en-US", { month: "short" });
+      const dy = d.getDate();
+      const hr = d.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      return `${mo} ${dy}, ${hr}`;
+    };
+    const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const uid = () => "id-" + Math.random().toString(36).slice(2, 9);
+
+    const getPropertyUnits = (property) => {
+      if (!property) return [];
+      const count = property.units;
+      const unitsPerFloor = count <= 12 ? count : count <= 48 ? 12 : 5;
+      const floors = Math.ceil(count / unitsPerFloor);
+      const units = [];
+      for (let f = 1; f <= floors; f++) {
+        for (let u = 1; u <= unitsPerFloor && units.length < count; u++) {
+          units.push(String(f * 100 + u));
+        }
+      }
+      return ["Common Area", ...units];
+    };
+
+    const STATUS_COLORS = {
+      Unassigned: { bg: "#fef3c7", text: "#92400e", dot: "#f59e0b" },
+      Assigned: { bg: "#dbeafe", text: "#1e40af", dot: "#3b82f6" },
+      "In Progress": { bg: "#f3e8ff", text: "#6200b0", dot: "#7a00df" },
+      Completed: { bg: "#d1fae5", text: "#065f46", dot: "#10b981" },
+      "Needs Review": { bg: "#fde2e2", text: "#991b1b", dot: "#ef4444" },
+      Closed: { bg: "#e5e7eb", text: "#374151", dot: "#6b7280" },
+      Archived: { bg: "#f3f4f6", text: "#6b7280", dot: "#9ca3af" },
+    };
+
+    const PRIORITY_COLORS = {
+      Low: { bg: "#f0fdf4", text: "#166534", border: "#86efac" },
+      Medium: { bg: "#fefce8", text: "#854d0e", border: "#fde047" },
+      High: { bg: "#fff7ed", text: "#9a3412", border: "#fdba74" },
+      Urgent: { bg: "#fef2f2", text: "#991b1b", border: "#fca5a5" },
+    };
+
+    const TECH_STATUS_COLORS = {
+      available: "#10b981",
+      "on-job": "#7a00df",
+      "en-route": "#f59e0b",
+      "off-duty": "#9ca3af",
+    };
+
+    // ─── Styles ──────────────────────────────────────────────────────────────────
+
+    const S = {
+      app: { fontFamily: "'Montserrat', sans-serif", minHeight: "100vh", background: "#f5f5f5", color: "#1a1a2e", fontSize: 14 },
+      mono: { fontFamily: "'Montserrat', sans-serif" },
+      nav: { background: "#1a1a1a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", height: 56, position: "sticky", top: 0, zIndex: 100 },
+      logo: { fontFamily: "'Montserrat', sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.05em", color: "#c084fc" },
+      navRight: { display: "flex", alignItems: "center", gap: 16 },
+      navUser: { fontSize: 13, color: "#94a3b8" },
+      navBtn: { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "#cbd5e1", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontSize: 12, fontFamily: "'Montserrat', sans-serif" },
+      tabBar: { display: "flex", gap: 2, padding: "12px 24px 0", background: "#f5f5f5" },
+      tab: (active) => ({ padding: "8px 18px", borderRadius: "8px 8px 0 0", cursor: "pointer", fontSize: 13, fontWeight: active ? 600 : 400, background: active ? "#fff" : "transparent", color: active ? "#1a1a2e" : "#64748b", border: "none", borderBottom: active ? "2px solid #7a00df" : "2px solid transparent", fontFamily: "'Montserrat', sans-serif", transition: "all 0.15s" }),
+      card: { background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" },
+      page: { padding: "0 24px 24px", maxWidth: 1440, margin: "0 auto" },
+      h2: { fontSize: 16, fontWeight: 600, margin: 0 },
+      badge: (colors) => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600, background: colors.bg, color: colors.text }),
+      priBadge: (colors) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }),
+      btn: (variant = "primary") => {
+        const map = {
+          primary: { background: "#7a00df", color: "#fff", border: "none" },
+          secondary: { background: "#fff", color: "#374151", border: "1px solid #d1d5db" },
+          danger: { background: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" },
+          success: { background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7" },
+          ghost: { background: "transparent", color: "#7a00df", border: "none" },
+        };
+        return { ...map[variant], borderRadius: 6, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: "'Montserrat', sans-serif", transition: "opacity 0.15s" };
+      },
+      input: { width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, fontFamily: "'Montserrat', sans-serif", outline: "none", boxSizing: "border-box" },
+      select: { padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, fontFamily: "'Montserrat', sans-serif", background: "#fff", outline: "none", cursor: "pointer" },
+      label: { fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" },
+      textarea: { width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, fontFamily: "'Montserrat', sans-serif", outline: "none", boxSizing: "border-box", resize: "vertical", minHeight: 60 },
+      slidePanel: (open) => ({ position: "fixed", top: 0, right: 0, width: Math.min(560, window.innerWidth || 560), height: "100vh", background: "#fff", boxShadow: open ? "-8px 0 30px rgba(0,0,0,0.12)" : "none", transform: open ? "translateX(0)" : "translateX(100%)", transition: "transform 0.25s ease", zIndex: 200, overflowY: "auto", display: "flex", flexDirection: "column" }),
+      overlay: (open) => ({ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 199, opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none", transition: "opacity 0.2s" }),
+      th: { padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" },
+      td: { padding: "10px 14px", borderBottom: "1px solid #f3f4f6", whiteSpace: "nowrap", fontSize: 13 },
+      tdWrap: { padding: "10px 14px", borderBottom: "1px solid #f3f4f6", fontSize: 13, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+    };
+
+    // ─── Tiny Components ─────────────────────────────────────────────────────────
+
+    const StatusBadge = ({ status }) => {
+      const c = STATUS_COLORS[status] || STATUS_COLORS.Unassigned;
+      return <span style={S.badge(c)}><span style={{ width: 6, height: 6, borderRadius: "50%", background: c.dot, flexShrink: 0 }} />{status}</span>;
+    };
+    const PriorityBadge = ({ priority }) => <span style={S.priBadge(PRIORITY_COLORS[priority] || PRIORITY_COLORS.Low)}>{priority}</span>;
+    const Dot = ({ color, size = 8 }) => <span style={{ width: size, height: size, borderRadius: "50%", background: color, display: "inline-block", flexShrink: 0 }} />;
+
+    const Toast = ({ toasts }) => (
+      <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 9999, display: "flex", flexDirection: "column", gap: 8 }}>
+        {toasts.map((t) => (
+          <div key={t.id} style={{ background: t.type === "error" ? "#fef2f2" : t.type === "warn" ? "#fffbeb" : "#f0fdf4", border: `1px solid ${t.type === "error" ? "#fecaca" : t.type === "warn" ? "#fde68a" : "#86efac"}`, borderRadius: 8, padding: "10px 16px", fontSize: 13, maxWidth: 340, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", animation: "fadeIn 0.2s" }}>
+            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 2, color: t.type === "error" ? "#dc2626" : t.type === "warn" ? "#d97706" : "#059669" }}>{t.title}</div>
+            <div style={{ color: "#374151" }}>{t.message}</div>
+          </div>
+        ))}
+      </div>
+    );
+
+    const CapacityBar = ({ used, total }) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 80, height: 6, background: "#e5e7eb", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ width: `${(used / total) * 100}%`, height: "100%", borderRadius: 99, background: used >= total ? "#ef4444" : used >= total * 0.7 ? "#f59e0b" : "#10b981", transition: "width 0.3s" }} />
+        </div>
+        <span style={{ fontSize: 11, color: "#64748b", ...S.mono }}>{used}/{total}</span>
+      </div>
+    );
+
+    // ─── Login Screen ────────────────────────────────────────────────────────────
+
+    const LoginScreen = ({ onLogin }) => {
+      const accounts = [
+        { user: USERS[0], desc: "Full access, all properties" },
+        { user: USERS[1], desc: "Manage work orders & techs" },
+        { user: USERS[3], desc: "Read-only: Harold, Carlton" },
+        { user: USERS[6], desc: "Tech mobile view (Jerry)" },
+        { user: USERS[7], desc: "Tenant view (Sarah Chen, Unit 204)" },
+      ];
+      return (
+        <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "linear-gradient(135deg, #1a1a1a 0%, #2a1a2e 50%, #3a0060 100%)" }}>
+          <div style={{ width: 420, padding: 40, background: "#fff", borderRadius: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ textAlign: "center", marginBottom: 32 }}>
+              <div style={{ ...S.mono, fontSize: 28, fontWeight: 700, color: "#7a00df", letterSpacing: "0.06em" }}>ROMrepair</div>
+              <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>Property Maintenance Dispatch</div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Demo Accounts</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {accounts.map(({ user, desc }) => (
+                <button key={user.id} onClick={() => onLogin(user)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", textAlign: "left", fontFamily: "'Montserrat', sans-serif", transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#7a00df"; e.currentTarget.style.background = "#f9f0ff"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#f8fafc"; }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#1a1a2e" }}>{user.name}</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{desc}</div>
+                  </div>
+                  <span style={{ ...S.badge({ bg: "#f3e8ff", text: "#5800b0" }), fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>{user.role === "pm" ? "Prop Mgr" : user.role === "tech" ? "Tech" : user.role}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ─── Main App ────────────────────────────────────────────────────────────────
+
+    function ROMrepair() {
+      const [user, setUser] = useState(null);
+      const [workOrders, setWorkOrders] = useState(initialWorkOrders);
+      const [toasts, setToasts] = useState([]);
+      const [selectedWO, setSelectedWO] = useState(null);
+      const [tab, setTab] = useState("active");
+      const [techExpanded, setTechExpanded] = useState(false);
+      const [techDetail, setTechDetail] = useState(null);
+      const [filterProp, setFilterProp] = useState("all");
+      const [filterStatus, setFilterStatus] = useState("all");
+      const [filterCategory, setFilterCategory] = useState("all");
+      const [searchQ, setSearchQ] = useState("");
+      const [createMode, setCreateMode] = useState(null);
+      const [sortCol, setSortCol] = useState(null);
+      const [sortDir, setSortDir] = useState("asc");
+      const [columnFilters, setColumnFilters] = useState({});
+      const setColFilter = (col, vals) => setColumnFilters((prev) => ({ ...prev, [col]: vals }));
+
+      const toast = useCallback((title, message, type = "info") => {
+        const id = uid();
+        setToasts((p) => [...p, { id, title, message, type }]);
+        setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 4000);
+      }, []);
+
+      const updateWO = useCallback((id, changes) => {
+        setWorkOrders((prev) => prev.map((wo) => wo.id === id ? { ...wo, ...changes, updated: Date.now() } : wo));
+        if (selectedWO?.id === id) setSelectedWO((p) => p ? { ...p, ...changes, updated: Date.now() } : p);
+      }, [selectedWO]);
+
+      const addComm = useCallback((woId, type, to, msg) => {
+        const comm = { id: uid(), type, to, msg, time: Date.now() };
+        setWorkOrders((prev) => prev.map((wo) => wo.id === woId ? { ...wo, communications: [...wo.communications, comm] } : wo));
+        if (selectedWO?.id === woId) setSelectedWO((p) => p ? { ...p, communications: [...p.communications, comm] } : p);
+      }, [selectedWO]);
+
+      const techSummary = useMemo(() => {
+        const counts = { available: 0, "on-job": 0, "en-route": 0, "off-duty": 0 };
+        TECHS.forEach((t) => counts[t.status]++);
+        return counts;
+      }, []);
+
+      if (!user) return <LoginScreen onLogin={setUser} />;
+
+      const isAdmin = user.role === "admin";
+      const isDispatch = user.role === "dispatcher" || isAdmin;
+      const isTech = user.role === "tech";
+      const isTenant = user.role === "tenant";
+      const isPM = user.role === "pm";
+
+      const visibleProperties = isPM ? PROPERTIES.filter((p) => user.properties?.includes(p.id)) : PROPERTIES;
+      const visibleWOs = workOrders.filter((wo) => {
+        if (isTenant) return wo.tenantId === user.id;
+        if (isTech) return (wo.techIds || []).includes(user.techId) || wo.subTrades?.some((st) => st.techId === user.techId);
+        if (isPM) return user.properties?.includes(wo.propertyId);
+        return true;
+      });
+
+      const todayStr = new Date().toDateString();
+      const isCompletedToday = (wo) => {
+        const d = new Date(wo.completedAt || wo.updated);
+        return d.toDateString() === todayStr;
+      };
+
+      const filtered = visibleWOs.filter((wo) => {
+        if (tab === "active") {
+          if (["Archived", "Closed"].includes(wo.status)) return false;
+          if (wo.status === "Completed" && !isCompletedToday(wo)) return false;
+        } else if (tab === "archive") {
+          if (!["Archived", "Closed", "Completed"].includes(wo.status)) return false;
+          if (wo.status === "Completed" && isCompletedToday(wo)) return false;
+        } else if (tab === "renovations") {
+          return wo.type === "renovation";
+        } else if (tab === "team") {
+          return false;
+        }
+        if (filterProp !== "all" && wo.propertyId !== filterProp) return false;
+        if (filterStatus !== "all" && wo.status !== filterStatus) return false;
+        if (filterCategory !== "all" && wo.category !== filterCategory) return false;
+        if (searchQ) {
+          const q = searchQ.toLowerCase();
+          if (!(wo.id.toLowerCase().includes(q) || wo.description?.toLowerCase().includes(q) || wo.tenantName?.toLowerCase().includes(q) || (wo.unit || "").includes(q))) return false;
+        }
+        for (const [col, vals] of Object.entries(columnFilters)) {
+          if (!vals || vals.length === 0) continue;
+          const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+          const techNames = (wo.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name).filter(Boolean);
+          let woVal;
+          if (col === "type") woVal = wo.type;
+          else if (col === "property") woVal = prop?.name || "";
+          else if (col === "unit") woVal = wo.unit || "";
+          else if (col === "category") woVal = wo.category || "";
+          else if (col === "priority") woVal = wo.priority || "";
+          else if (col === "status") woVal = wo.status || "";
+          else if (col === "tech") { if (!vals.some((v) => techNames.includes(v))) return false; continue; }
+          else continue;
+          if (!vals.includes(woVal)) return false;
+        }
+        return true;
+      }).sort((a, b) => {
+        if (sortCol) {
+          const dir = sortDir === "asc" ? 1 : -1;
+          const propA = PROPERTIES.find((p) => p.id === a.propertyId);
+          const propB = PROPERTIES.find((p) => p.id === b.propertyId);
+          const techA = TECHS.find((t) => t.id === (a.techIds || [])[0]);
+          const techB = TECHS.find((t) => t.id === (b.techIds || [])[0]);
+          const priOrdS = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+          switch (sortCol) {
+            case "id": return dir * a.id.localeCompare(b.id);
+            case "type": return dir * a.type.localeCompare(b.type);
+            case "property": return dir * (propA?.name || "").localeCompare(propB?.name || "");
+            case "unit": return dir * (a.unit || "").localeCompare(b.unit || "");
+            case "category": return dir * (a.category || "").localeCompare(b.category || "");
+            case "priority": return dir * ((priOrdS[a.priority] ?? 9) - (priOrdS[b.priority] ?? 9));
+            case "status": return dir * a.status.localeCompare(b.status);
+            case "tech": return dir * ((techA?.name || "").localeCompare(techB?.name || ""));
+            case "updated": return dir * (a.updated - b.updated);
+            case "scheduled": {
+              const da = a.scheduledDate || "9999";
+              const db = b.scheduledDate || "9999";
+              return dir * da.localeCompare(db);
+            }
+            default: break;
+          }
+        }
+        const priOrd = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+        const statOrd = { "Needs Review": 0, Unassigned: 1, "In Progress": 2, Assigned: 3, Completed: 4, Closed: 5, Archived: 6 };
+        if ((statOrd[a.status] ?? 9) !== (statOrd[b.status] ?? 9)) return (statOrd[a.status] ?? 9) - (statOrd[b.status] ?? 9);
+        if ((priOrd[a.priority] ?? 9) !== (priOrd[b.priority] ?? 9)) return (priOrd[a.priority] ?? 9) - (priOrd[b.priority] ?? 9);
+        return b.updated - a.updated;
+      });
+
+      const openDetail = (wo) => { setSelectedWO({ ...wo }); setCreateMode(null); };
+      const closeDetail = () => { setSelectedWO(null); setTechDetail(null); };
+
+      const assignWO = (woId, techIds, priority) => {
+        const tech = TECHS.find((t) => t.id === techIds[0]);
+        updateWO(woId, { techIds, techId: techIds[0] || null, priority, status: "Assigned", dispatchedBy: user.name });
+        addComm(woId, "sms", "tech", `New assignment: ${woId}. Check your queue.`);
+        toast("Assigned", `${woId} → ${tech?.name}`, "info");
+      };
+
+      const startWork = (woId) => {
+        const wo = workOrders.find((w) => w.id === woId);
+        updateWO(woId, { status: "In Progress", arrivedAt: Date.now() });
+        addComm(woId, "sms", "tenant", "A technician has started work on your repair.");
+        addComm(woId, "email", "pm", `Work started: ${woId} Unit ${wo?.unit}`);
+        toast("Notifications sent", "Tenant (SMS) + Property Manager (email)", "info");
+      };
+
+      const completeWork = (woId, notes) => {
+        const wo = workOrders.find((w) => w.id === woId);
+        updateWO(woId, { status: "Completed", completionNotes: notes, completedAt: Date.now() });
+        addComm(woId, "sms", "tenant", "Your repair is now complete!");
+        addComm(woId, "email", "pm", `Work completed: ${woId} Unit ${wo?.unit}`);
+        toast("Completed", `${woId} marked complete. Notifications sent.`, "info");
+      };
+
+      const flagReview = (woId, note) => {
+        updateWO(woId, { status: "Needs Review", notes: note });
+        addComm(woId, "email", "dispatch", `Tech flagged ${woId} for review: ${note}`);
+        toast("Flagged", `${woId} sent to dispatch for review`, "warn");
+      };
+
+      const stopWork = (woId) => {
+        updateWO(woId, { status: "Assigned" });
+        toast("Stopped", `${woId} returned to Assigned`, "warn");
+      };
+
+      const closeWO = (woId, note) => {
+        updateWO(woId, { status: "Closed", closedBy: `${user.role === "admin" ? "Admin" : "Dispatcher"} (${user.name})`, closedNote: note });
+        toast("Closed", `${woId} closed and archived`, "info");
+      };
+
+      return (
+        <div style={S.app}>
+          <nav style={S.nav}>
+            <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+              <span style={S.logo}>ROM<span style={{ color: "#f59e0b" }}>repair</span></span>
+              {isDispatch && <span style={{ fontSize: 12, color: "#64748b", background: "rgba(255,255,255,0.06)", padding: "3px 10px", borderRadius: 4 }}>Dispatch Console</span>}
+            </div>
+            <div style={S.navRight}>
+              <span style={S.navUser}>{user.name} · <span style={{ textTransform: "capitalize" }}>{user.role === "pm" ? "Property Manager" : user.role}</span></span>
+              <button style={S.navBtn} onClick={() => { setUser(null); setSelectedWO(null); setTab("active"); }}>Sign Out</button>
+            </div>
+          </nav>
+
+          {isTenant && <TenantView user={user} workOrders={visibleWOs} toast={toast} setWorkOrders={setWorkOrders} />}
+          {isTech && <TechView user={user} workOrders={visibleWOs} techs={TECHS} startWork={startWork} completeWork={completeWork} flagReview={flagReview} stopWork={stopWork} updateWO={updateWO} toast={toast} />}
+
+          {(isDispatch || isPM) && (
+            <div style={S.page}>
+              <div style={{ ...S.tabBar, justifyContent: "space-between" }}>
+                <div style={{ display: "flex", gap: 2 }}>
+                  {["active", "renovations", "team", "archive"].map((t) => (
+                    <button key={t} style={S.tab(tab === t)} onClick={() => setTab(t)}>
+                      {t === "active" ? "Active Work Orders" : t === "renovations" ? "Renovations" : t === "team" ? "Team Grid" : "Archive"}
+                    </button>
+                  ))}
+                </div>
+                {isDispatch && (
+                  <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
+                    <button style={S.btn("primary")} onClick={() => { setCreateMode("repair"); setSelectedWO(null); }}>+ Work Order</button>
+                    <button style={{ ...S.btn("secondary"), borderColor: "#f59e0b", color: "#92400e", background: "#fffbeb" }} onClick={() => { setCreateMode("renovation"); setSelectedWO(null); }}>+ Renovation</button>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ ...S.card, padding: 0 }}>
+                {isDispatch && tab !== "team" && tab !== "archive" && (
+                  <TechWorkloadStrip techs={TECHS} expanded={techExpanded} toggle={() => setTechExpanded(!techExpanded)} onTechClick={setTechDetail} workOrders={workOrders} />
+                )}
+                {tab === "team" && <TeamGrid techs={TECHS} workOrders={workOrders} onTechClick={setTechDetail} />}
+                {tab === "archive" && <ArchiveTab workOrders={filtered} openDetail={openDetail} />}
+                {(tab === "active" || tab === "renovations") && (
+                  <>
+                    <div style={{ padding: "14px 18px", display: "flex", gap: 10, flexWrap: "wrap", borderBottom: "1px solid #e5e7eb", alignItems: "center" }}>
+                      <input style={{ ...S.input, maxWidth: 220 }} placeholder="Search ID, description, tenant…" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
+                      <select style={S.select} value={filterProp} onChange={(e) => setFilterProp(e.target.value)}>
+                        <option value="all">All Properties</option>
+                        {visibleProperties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <select style={S.select} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                        <option value="all">All Statuses</option>
+                        {STATUSES.filter((s) => s !== "Archived" && s !== "Closed").map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      {tab === "active" && (
+                        <select style={S.select} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                          <option value="all">All Categories</option>
+                          {[...CATEGORIES, "Renovation"].map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      )}
+                      <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>{filtered.length} result{filtered.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table>
+                        <thead>
+                          <tr style={{ background: "#fafbfc" }}>
+                            {(() => {
+                              const uv = (col) => {
+                                const vals = new Set();
+                                visibleWOs.forEach((wo) => {
+                                  if (col === "type") vals.add(wo.type);
+                                  else if (col === "property") { const p = PROPERTIES.find((p) => p.id === wo.propertyId); if (p) vals.add(p.name); }
+                                  else if (col === "unit") { if (wo.unit) vals.add(wo.unit); }
+                                  else if (col === "category") { if (wo.category) vals.add(wo.category); }
+                                  else if (col === "priority") { if (wo.priority) vals.add(wo.priority); }
+                                  else if (col === "status") { if (wo.status) vals.add(wo.status); }
+                                  else if (col === "tech") { (wo.techIds || []).forEach((id) => { const t = TECHS.find((t) => t.id === id); if (t) vals.add(t.name); }); }
+                                });
+                                return [...vals].sort();
+                              };
+                              const onSort = (col) => { if (sortCol === col) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortCol(col); setSortDir("asc"); } };
+                              const cols = [
+                                { col: "id", label: "WO #", filterable: false },
+                                { col: "type", label: "Type", filterable: true },
+                                { col: "property", label: "Property", filterable: true },
+                                { col: "unit", label: "Unit", filterable: true },
+                                { col: "category", label: "Category", filterable: true },
+                                { col: "priority", label: "Priority", filterable: true },
+                                { col: "status", label: "Status", filterable: true },
+                                { col: "tech", label: "Assigned To", filterable: true },
+                                { col: "scheduled", label: "Scheduled", filterable: false },
+                                { col: "updated", label: "Updated", filterable: false },
+                              ];
+                              return cols.map(({ col, label, filterable }) => (
+                                <SortFilterTh key={col} col={col} label={label} sortCol={sortCol} sortDir={sortDir} onSort={onSort} colFilters={columnFilters} uniqueVals={filterable ? uv(col) : null} onFilter={setColFilter} />
+                              ));
+                            })()}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((wo) => {
+                            const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+                            const woTechNames = (wo.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name).filter(Boolean);
+                            return (
+                              <tr key={wo.id} onClick={() => openDetail(wo)} style={{ cursor: "pointer", transition: "background 0.1s" }}>
+                                <td style={{ ...S.td, ...S.mono, fontWeight: 600, color: "#7a00df" }}>{wo.id}</td>
+                                <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: wo.type === "renovation" ? "#fef3c7" : "#f3e8ff", color: wo.type === "renovation" ? "#92400e" : "#5800b0", fontWeight: 600, textTransform: "uppercase" }}>{wo.type}</span></td>
+                                <td style={S.tdWrap}>{prop?.name}</td>
+                                <td style={{ ...S.td, ...S.mono }}>{wo.unit}</td>
+                                <td style={S.td}>{wo.category}</td>
+                                <td style={S.td}><PriorityBadge priority={wo.priority} /></td>
+                                <td style={S.td}><StatusBadge status={wo.status} /></td>
+                                <td style={S.td}>{woTechNames.length ? woTechNames.join(", ") : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>
+                                  {wo.scheduledDate ? (
+                                    <span style={{ color: "#7a00df", fontWeight: 500 }}>
+                                      {new Date(wo.scheduledDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                      {wo.scheduledSlot && <span style={{ color: "#94a3b8", fontWeight: 400 }}> · {wo.scheduledSlot}</span>}
+                                    </span>
+                                  ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                                </td>
+                                <td style={{ ...S.td, color: "#94a3b8", fontSize: 12 }}>{fmt(wo.updated)}</td>
+                              </tr>
+                            );
+                          })}
+                          {filtered.length === 0 && (
+                            <tr><td colSpan={10} style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>No work orders found</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={S.overlay(!!selectedWO)} onClick={closeDetail} />
+          <div style={S.slidePanel(!!selectedWO)}>
+            {selectedWO && (
+              <DetailPanel
+                wo={selectedWO}
+                workOrders={workOrders}
+                techs={TECHS}
+                properties={PROPERTIES}
+                isDispatch={isDispatch}
+                isPM={isPM}
+                user={user}
+                onClose={closeDetail}
+                updateWO={updateWO}
+                assignWO={assignWO}
+                startWork={startWork}
+                completeWork={completeWork}
+                flagReview={flagReview}
+                closeWO={closeWO}
+                addComm={addComm}
+                toast={toast}
+                setWorkOrders={setWorkOrders}
+              />
+            )}
+          </div>
+
+          {techDetail && (
+            <>
+              <div style={S.overlay(true)} onClick={() => setTechDetail(null)} />
+              <div style={S.slidePanel(true)}>
+                <TechDetailPanel tech={techDetail} workOrders={workOrders} onClose={() => setTechDetail(null)} />
+              </div>
+            </>
+          )}
+
+          <div style={S.overlay(!!createMode)} onClick={() => setCreateMode(null)} />
+          <div style={S.slidePanel(!!createMode)}>
+            {createMode && (
+              <CreateWOPanel
+                mode={createMode}
+                properties={PROPERTIES}
+                techs={TECHS}
+                user={user}
+                onClose={() => setCreateMode(null)}
+                onCreate={(wo) => {
+                  setWorkOrders((p) => [wo, ...p]);
+                  setCreateMode(null);
+                  toast("Created", `${wo.id} created successfully`, "info");
+                  if (wo.type === "renovation") setTab("renovations");
+                }}
+              />
+            )}
+          </div>
+
+          <Toast toasts={toasts} />
+        </div>
+      );
+    }
+
+    // ─── Sort + Filter Column Header ─────────────────────────────────────────────
+
+    function SortFilterTh({ col, label, sortCol, sortDir, onSort, colFilters, uniqueVals, onFilter }) {
+      const [open, setOpen] = useState(false);
+      const active = (colFilters[col] || []);
+      const hasFilter = active.length > 0;
+      const showFilter = uniqueVals && uniqueVals.length > 0;
+
+      return (
+        <th style={{ ...S.th, position: "relative", userSelect: "none" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <span style={{ cursor: "pointer" }} onClick={() => onSort(col)}>
+              {label}
+              <span style={{ fontSize: 10, color: sortCol === col ? "#7a00df" : "#d1d5db", marginLeft: 3 }}>
+                {sortCol === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+              </span>
+            </span>
+            {showFilter && (
+              <span style={{ position: "relative" }}>
+                <button
+                  onMouseDown={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+                  style={{ background: hasFilter ? "#f3e8ff" : "none", border: "none", cursor: "pointer", padding: "1px 4px", color: hasFilter ? "#7a00df" : "#94a3b8", fontSize: 11, borderRadius: 3, lineHeight: 1.2 }}
+                  title="Filter"
+                >▾</button>
+                {open && (
+                  <div
+                    style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", zIndex: 500, minWidth: 160, maxHeight: 240, overflowY: "auto" }}
+                    onMouseLeave={() => setOpen(false)}
+                  >
+                    {hasFilter && (
+                      <div onMouseDown={() => { onFilter(col, []); }} style={{ padding: "7px 12px", fontSize: 11, color: "#7a00df", fontWeight: 700, cursor: "pointer", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 6 }}>
+                        ✕ Clear filter
+                      </div>
+                    )}
+                    {uniqueVals.map((val) => {
+                      const checked = active.includes(val);
+                      return (
+                        <div key={val} onMouseDown={() => onFilter(col, checked ? active.filter((v) => v !== val) : [...active, val])}
+                          style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: checked ? "#f9f0ff" : "#fff" }}>
+                          <input type="checkbox" checked={checked} readOnly style={{ accentColor: "#7a00df", cursor: "pointer" }} />
+                          <span style={{ fontWeight: checked ? 600 : 400 }}>{val}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </span>
+            )}
+          </div>
+        </th>
+      );
+    }
+
+    // ─── Smart Search Component ──────────────────────────────────────────────────
+
+    function SmartSearch({ placeholder, options, onSelect, style }) {
+      // options: [{ id, label, sublabel }]
+      const [query, setQuery] = useState("");
+      const [open, setOpen] = useState(false);
+      const [selected, setSelected] = useState(null);
+
+      const filtered = query
+        ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()) || (o.sublabel && o.sublabel.toLowerCase().includes(query.toLowerCase())))
+        : options;
+
+      const handleSelect = (opt) => {
+        setSelected(opt);
+        setQuery(opt.label);
+        setOpen(false);
+        onSelect(opt.id);
+      };
+
+      const handleClear = (e) => {
+        e.stopPropagation();
+        setSelected(null);
+        setQuery("");
+        onSelect("");
+      };
+
+      return (
+        <div style={{ position: "relative", ...style }}>
+          <div style={{ position: "relative" }}>
+            <input
+              style={{ ...S.input, paddingRight: selected ? 28 : 12 }}
+              value={query}
+              placeholder={placeholder}
+              onChange={(e) => { setQuery(e.target.value); setOpen(true); if (!e.target.value) { setSelected(null); onSelect(""); } }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+            />
+            {selected && (
+              <button onMouseDown={handleClear} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+            )}
+          </div>
+          {open && filtered.length > 0 && (
+            <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 300, maxHeight: 200, overflowY: "auto" }}>
+              {filtered.map((opt) => (
+                <div key={opt.id} onMouseDown={() => handleSelect(opt)} style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid #f3f4f6" }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "#f9f0ff"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}>
+                  <div style={{ fontWeight: 500 }}>{opt.label}</div>
+                  {opt.sublabel && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{opt.sublabel}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {open && filtered.length === 0 && query && (
+            <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#94a3b8", zIndex: 300 }}>
+              No results for "{query}"
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Create Work Order / Renovation Panel ────────────────────────────────────
+
+    function CreateWOPanel({ mode, properties, techs, user, onClose, onCreate }) {
+      const [propId, setPropId] = useState("");
+      const [unit, setUnit] = useState("");
+      const [category, setCategory] = useState("Plumbing");
+      const [description, setDescription] = useState("");
+      const [priority, setPriority] = useState("Medium");
+      const [assignTechs, setAssignTechs] = useState([]);
+      const [subTrades, setSubTrades] = useState([]);
+      const [scheduledDate, setScheduledDate] = useState("");
+      const [scheduledSlot, setScheduledSlot] = useState("Morning");
+      const [error, setError] = useState("");
+
+      const selectedProp = properties.find((p) => p.id === propId);
+      const unitOptions = selectedProp ? getPropertyUnits(selectedProp) : [];
+
+      const propSearchOptions = properties.map((p) => ({ id: p.id, label: p.name, sublabel: p.address }));
+
+      const isReno = mode === "renovation";
+
+      const toggleSubTrade = (trade) => {
+        setSubTrades((p) => {
+          const exists = p.find((st) => st.trade === trade);
+          if (exists) return p.filter((st) => st.trade !== trade);
+          return [...p, { id: uid(), trade, status: "Unassigned", techId: null, notes: "", scheduledDate: "", scheduledSlot: "Morning" }];
+        });
+      };
+
+      const updateSubTrade = (idx, changes) => {
+        setSubTrades((p) => p.map((st, i) => i === idx ? { ...st, ...changes } : st));
+      };
+
+      const handleCreate = () => {
+        if (!propId) { setError("Select a property"); return; }
+        if (!unit.trim()) { setError("Enter a unit number"); return; }
+        if (!description.trim()) { setError("Enter a description"); return; }
+        if (isReno && subTrades.length === 0) { setError("Add at least one sub-trade"); return; }
+
+        const woId = `WO-${1100 + Math.floor(Math.random() * 900)}`;
+        const hasAssignment = isReno ? subTrades.some((st) => st.techId) : assignTechs.length > 0;
+
+        const wo = {
+          id: woId,
+          type: isReno ? "renovation" : "repair",
+          propertyId: propId,
+          unit: unit,
+          category: isReno ? "Renovation" : category,
+          description: description.trim(),
+          urgency: priority === "Urgent",
+          status: hasAssignment ? "Assigned" : "Unassigned",
+          priority,
+          techIds: isReno ? [] : assignTechs,
+          techId: isReno ? null : (assignTechs[0] || null),
+          tenantId: null,
+          tenantName: null,
+          created: Date.now(),
+          updated: Date.now(),
+          scheduledDate: scheduledDate || null,
+          scheduledSlot: scheduledDate ? scheduledSlot : null,
+          createdBy: user.name,
+          dispatchedBy: null,
+          arrivedAt: null,
+          completedAt: null,
+          photos: [],
+          communications: [{
+            id: uid(), type: "email", to: "dispatch",
+            msg: `${isReno ? "Renovation" : "Work order"} ${woId} created by ${user.name}.`,
+            time: Date.now(),
+          }],
+          notes: "",
+          completionNotes: "",
+          closedBy: null,
+          closedNote: "",
+          ...(isReno ? { subTrades: subTrades.map((st) => ({ ...st, status: st.techId ? "Assigned" : "Unassigned" })) } : {}),
+        };
+        onCreate(wo);
+      };
+
+      const sectionStyle = { padding: "16px 20px", borderBottom: "1px solid #f3f4f6" };
+      const fieldLabel = { ...S.label, marginBottom: 4 };
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18, display: "flex", alignItems: "center", gap: 10 }}>
+                {isReno ? "New Renovation" : "New Work Order"}
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: isReno ? "#fef3c7" : "#f3e8ff", color: isReno ? "#92400e" : "#5800b0", fontWeight: 600, textTransform: "uppercase" }}>{mode}</span>
+              </div>
+              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>Created by {user.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#94a3b8", padding: 4 }}>✕</button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <div style={sectionStyle}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={fieldLabel}>Property</div>
+                  <SmartSearch
+                    placeholder="Search property…"
+                    options={propSearchOptions}
+                    onSelect={(id) => { setPropId(id); setUnit(""); }}
+                  />
+                </div>
+                <div style={{ width: 140 }}>
+                  <div style={fieldLabel}>Unit</div>
+                  <select style={{ ...S.select, width: "100%" }} value={unit} onChange={(e) => setUnit(e.target.value)} disabled={!propId}>
+                    <option value="">{propId ? "Select unit…" : "Pick property first"}</option>
+                    {unitOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {!isReno && (
+              <div style={sectionStyle}>
+                <div style={fieldLabel}>Category</div>
+                <select style={{ ...S.select, width: "100%" }} value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div style={sectionStyle}>
+              <div style={fieldLabel}>Description</div>
+              <textarea style={S.textarea} rows={3} placeholder={isReno ? "Describe renovation scope…" : "Describe the issue…"} value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={fieldLabel}>Priority</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {PRIORITIES.map((p) => (
+                  <button key={p} onClick={() => setPriority(p)} style={{ ...S.priBadge(PRIORITY_COLORS[p]), cursor: "pointer", opacity: priority === p ? 1 : 0.4, transform: priority === p ? "scale(1.08)" : "scale(1)", transition: "all 0.15s", border: `2px solid ${priority === p ? PRIORITY_COLORS[p].border : "transparent"}` }}>{p}</button>
+                ))}
+              </div>
+            </div>
+
+            {!isReno && (
+              <div style={sectionStyle}>
+                <div style={fieldLabel}>Assign Technicians (optional)</div>
+                <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", marginTop: 4 }}>
+                  {techs.filter((t) => t.status !== "off-duty").map((t) => {
+                    const checked = assignTechs.includes(t.id);
+                    return (
+                      <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", cursor: "pointer", background: checked ? "#f9f0ff" : "#fff", borderLeft: checked ? "3px solid #7a00df" : "3px solid transparent", borderBottom: "1px solid #f3f4f6", transition: "all 0.1s" }}>
+                        <input type="checkbox" checked={checked} onChange={() => setAssignTechs((prev) => checked ? prev.filter((id) => id !== t.id) : [...prev, t.id])} style={{ accentColor: "#7a00df" }} />
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: checked ? 600 : 400 }}>{t.name}</span>
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{t.specialty}</span>
+                        <CapacityBar used={t.activeJobs} total={t.capacity} />
+                      </label>
+                    );
+                  })}
+                </div>
+                {assignTechs.length > 0 && <div style={{ fontSize: 12, color: "#7a00df", marginTop: 6 }}>Selected: {assignTechs.map((id) => techs.find((t) => t.id === id)?.name).join(", ")}</div>}
+              </div>
+            )}
+
+            {isReno && (
+              <div style={sectionStyle}>
+                <div style={{ ...fieldLabel, marginBottom: 10 }}>Sub-Trades</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+                  {SUB_TRADE_TYPES.map((trade) => {
+                    const sel = subTrades.some((st) => st.trade === trade);
+                    return (
+                      <button key={trade} type="button" onClick={() => toggleSubTrade(trade)} style={{ padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Montserrat', sans-serif", border: `2px solid ${sel ? "#7a00df" : "#d1d5db"}`, background: sel ? "#f3e8ff" : "#fff", color: sel ? "#7a00df" : "#64748b", transition: "all 0.15s" }}>
+                        {sel ? "✓ " : ""}{trade}
+                      </button>
+                    );
+                  })}
+                </div>
+                {subTrades.length === 0 && <div style={{ fontSize: 12, color: "#d1d5db" }}>Select one or more trades above</div>}
+                {subTrades.map((st, i) => (
+                  <div key={st.id} style={{ padding: "12px 14px", background: "#fafafa", borderRadius: 8, marginBottom: 8, border: "1px solid #e5e7eb" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#7a00df", marginBottom: 8 }}>{st.trade}</div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                      <select style={{ ...S.select, flex: 1, minWidth: 140, fontSize: 12 }} value={st.techId || ""} onChange={(e) => updateSubTrade(i, { techId: e.target.value || null })}>
+                        <option value="">Assign tech…</option>
+                        {techs.filter((t) => t.status !== "off-duty").map((t) => <option key={t.id} value={t.id}>{t.name} ({t.specialty})</option>)}
+                      </select>
+                      <input type="date" style={{ ...S.input, width: 150, fontSize: 12 }} value={st.scheduledDate || ""} onChange={(e) => updateSubTrade(i, { scheduledDate: e.target.value })} />
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {["Morning", "Afternoon"].map((slot) => (
+                          <button key={slot} type="button" onClick={() => updateSubTrade(i, { scheduledSlot: slot })} style={{ padding: "5px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Montserrat', sans-serif", border: `1px solid ${st.scheduledSlot === slot && st.scheduledDate ? "#7a00df" : "#d1d5db"}`, background: st.scheduledSlot === slot && st.scheduledDate ? "#f3e8ff" : "#fff", color: st.scheduledSlot === slot && st.scheduledDate ? "#7a00df" : "#64748b", opacity: st.scheduledDate ? 1 : 0.4 }}>{slot}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <input style={{ ...S.input, fontSize: 12 }} placeholder="Notes for this trade…" value={st.notes} onChange={(e) => updateSubTrade(i, { notes: e.target.value })} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={sectionStyle}>
+              <div style={fieldLabel}>Schedule (optional)</div>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Date</div>
+                  <input type="date" style={{ ...S.input }} value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Time Window</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {["Morning", "Afternoon"].map((slot) => (
+                      <button key={slot} onClick={() => setScheduledSlot(slot)} style={{ padding: "7px 16px", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "'Montserrat', sans-serif", border: `2px solid ${scheduledSlot === slot && scheduledDate ? "#7a00df" : "#d1d5db"}`, background: scheduledSlot === slot && scheduledDate ? "#f3e8ff" : "#fff", color: scheduledSlot === slot && scheduledDate ? "#5800b0" : "#374151", opacity: scheduledDate ? 1 : 0.4, transition: "all 0.15s" }}>{slot}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {scheduledDate && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Tenant will be notified to expect technician in the {scheduledSlot.toLowerCase()}.</div>}
+            </div>
+
+            {error && <div style={{ padding: "10px 20px", fontSize: 13, color: "#dc2626", background: "#fef2f2" }}>{error}</div>}
+          </div>
+
+          <div style={{ padding: "14px 20px", borderTop: "1px solid #e5e7eb", display: "flex", gap: 8, flexShrink: 0 }}>
+            <button style={S.btn("primary")} onClick={handleCreate}>{isReno ? "Create Renovation" : "Create Work Order"}</button>
+            <button style={S.btn("secondary")} onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    function DetailPanel({ wo, workOrders, techs, properties, isDispatch, isPM, user, onClose, updateWO, assignWO, startWork, completeWork, flagReview, closeWO, addComm, toast, setWorkOrders }) {
+      const [assignTechs, setAssignTechs] = useState(wo.techIds || []);
+      const [assignPri, setAssignPri] = useState(wo.priority || "Medium");
+      const [closeNote, setCloseNote] = useState("");
+      const [compNotes, setCompNotes] = useState(wo.completionNotes || "");
+      const [showCloseForm, setShowCloseForm] = useState(false);
+      const [newSubTrade, setNewSubTrade] = useState("");
+
+      const liveWO = workOrders.find((w) => w.id === wo.id) || wo;
+      const prop = properties.find((p) => p.id === liveWO.propertyId);
+
+      const sectionStyle = { padding: "16px 20px", borderBottom: "1px solid #f3f4f6" };
+      const fieldRow = { display: "flex", gap: 12, marginBottom: 10 };
+      const fieldLabel = { ...S.label, marginBottom: 4 };
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ ...S.mono, fontWeight: 700, fontSize: 18, color: "#7a00df" }}>{liveWO.id}</span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: liveWO.type === "renovation" ? "#fef3c7" : "#f3e8ff", color: liveWO.type === "renovation" ? "#92400e" : "#5800b0", fontWeight: 600, textTransform: "uppercase" }}>{liveWO.type}</span>
+              </div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>{prop?.name} · Unit {liveWO.unit}</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#94a3b8", padding: 4 }}>✕</button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <div style={{ ...sectionStyle, display: "flex", gap: 12, alignItems: "center" }}>
+              <StatusBadge status={liveWO.status} />
+              <PriorityBadge priority={liveWO.priority} />
+              {liveWO.urgency && <span style={{ fontSize: 11, fontWeight: 600, color: "#dc2626" }}>URGENT</span>}
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={fieldLabel}>Description</div>
+              <div style={{ fontSize: 14, lineHeight: 1.5 }}>{liveWO.description}</div>
+              {liveWO.tenantName && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 8 }}>Submitted by {liveWO.tenantName}</div>}
+            </div>
+
+            <div style={{ ...sectionStyle, display: "flex", gap: 24, flexWrap: "wrap" }}>
+              <div><div style={fieldLabel}>Created</div><div style={{ fontSize: 13 }}>{fmt(liveWO.created)}</div></div>
+              <div><div style={fieldLabel}>Updated</div><div style={{ fontSize: 13 }}>{fmt(liveWO.updated)}</div></div>
+              {liveWO.scheduledDate && (
+                <div>
+                  <div style={fieldLabel}>Scheduled</div>
+                  <div style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontWeight: 600, color: "#7a00df" }}>
+                      {new Date(liveWO.scheduledDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                    </span>
+                    {liveWO.scheduledSlot && (
+                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 99, background: "#f3e8ff", color: "#5800b0", fontWeight: 600 }}>{liveWO.scheduledSlot}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {isDispatch && !["Completed", "Closed", "Archived"].includes(liveWO.status) && liveWO.type === "repair" && (
+              <div style={sectionStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={fieldLabel}>Assign Technicians</div>
+                  <select style={{ ...S.select, width: 120 }} value={assignPri} onChange={(e) => setAssignPri(e.target.value)}>
+                    {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10, maxHeight: 180, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6, padding: "4px 0" }}>
+                  {techs.filter((t) => t.status !== "off-duty").map((t) => {
+                    const checked = assignTechs.includes(t.id);
+                    return (
+                      <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", cursor: "pointer", background: checked ? "#f9f0ff" : "transparent", borderLeft: checked ? "3px solid #7a00df" : "3px solid transparent", transition: "all 0.1s" }}>
+                        <input type="checkbox" checked={checked} onChange={() => setAssignTechs((prev) => checked ? prev.filter((id) => id !== t.id) : [...prev, t.id])} style={{ accentColor: "#7a00df" }} />
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: checked ? 600 : 400 }}>{t.name}</span>
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{t.specialty}</span>
+                        <CapacityBar used={t.activeJobs} total={t.capacity} />
+                      </label>
+                    );
+                  })}
+                </div>
+                {assignTechs.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#7a00df", marginBottom: 8 }}>
+                    Selected: {assignTechs.map((id) => TECHS.find((t) => t.id === id)?.name).join(", ")}
+                  </div>
+                )}
+                <button style={S.btn("primary")} disabled={assignTechs.length === 0} onClick={() => assignWO(liveWO.id, assignTechs, assignPri)}>
+                  {(liveWO.techIds || []).length > 0 ? "Reassign" : "Assign"} Work Order
+                </button>
+              </div>
+            )}
+
+            {isDispatch && (
+              <div style={{ ...sectionStyle, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {liveWO.status === "Assigned" && <button style={S.btn("primary")} onClick={() => startWork(liveWO.id)}>▶ Start Work</button>}
+                {liveWO.status === "In Progress" && (
+                  <button style={S.btn("success")} onClick={() => { if (compNotes.trim()) completeWork(liveWO.id, compNotes); else toast("Note required", "Add completion notes", "warn"); }}>✓ Complete</button>
+                )}
+                {!["Completed", "Closed", "Archived"].includes(liveWO.status) && (
+                  <button style={S.btn("danger")} onClick={() => setShowCloseForm(!showCloseForm)}>Close / Archive</button>
+                )}
+              </div>
+            )}
+
+            {showCloseForm && isDispatch && (
+              <div style={{ ...sectionStyle, background: "#fef2f2" }}>
+                <div style={fieldLabel}>Close Note (required)</div>
+                <textarea style={S.textarea} value={closeNote} onChange={(e) => setCloseNote(e.target.value)} placeholder="Reason for closing…" />
+                <button style={{ ...S.btn("danger"), marginTop: 8 }} disabled={!closeNote.trim()} onClick={() => { closeWO(liveWO.id, closeNote); setShowCloseForm(false); }}>Confirm Close</button>
+              </div>
+            )}
+
+            {(liveWO.status === "In Progress" || liveWO.completionNotes) && (
+              <div style={sectionStyle}>
+                <div style={fieldLabel}>Completion Notes</div>
+                {isDispatch && liveWO.status === "In Progress" ? (
+                  <textarea style={S.textarea} value={compNotes} onChange={(e) => setCompNotes(e.target.value)} placeholder="Describe work completed…" />
+                ) : (
+                  <div style={{ fontSize: 13, color: "#374151", background: "#f9fafb", padding: 10, borderRadius: 6 }}>{liveWO.completionNotes || "—"}</div>
+                )}
+              </div>
+            )}
+
+            {liveWO.notes && (
+              <div style={sectionStyle}>
+                <div style={fieldLabel}>Tech Notes</div>
+                <div style={{ fontSize: 13, background: "#fffbeb", padding: 10, borderRadius: 6, border: "1px solid #fde68a" }}>{liveWO.notes}</div>
+              </div>
+            )}
+
+            {liveWO.closedBy && (
+              <div style={sectionStyle}>
+                <div style={fieldLabel}>Closed By</div>
+                <div style={{ fontSize: 13 }}>{liveWO.closedBy}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{liveWO.closedNote}</div>
+              </div>
+            )}
+
+            {liveWO.type === "renovation" && liveWO.subTrades && (
+              <div style={sectionStyle}>
+                <div style={{ ...fieldLabel, marginBottom: 10 }}>Sub-Trades</div>
+                {liveWO.subTrades.map((st, i) => {
+                  const stTech = techs.find((t) => t.id === st.techId);
+                  return (
+                    <div key={st.id} style={{ padding: "10px 12px", background: "#f9fafb", borderRadius: 6, marginBottom: 6, border: "1px solid #e5e7eb" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{st.trade}</span>
+                        <StatusBadge status={st.status} />
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>
+                        Tech: {stTech?.name || <span style={{ color: "#d1d5db" }}>Unassigned</span>}
+                      </div>
+                      {st.notes && <div style={{ fontSize: 12, color: "#94a3b8" }}>{st.notes}</div>}
+                      {isDispatch && (
+                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                          <select style={{ ...S.select, fontSize: 11, padding: "4px 8px" }} value={st.techId || ""} onChange={(e) => {
+                            const updated = [...liveWO.subTrades];
+                            updated[i] = { ...updated[i], techId: e.target.value || null, status: e.target.value ? "Assigned" : "Unassigned" };
+                            updateWO(liveWO.id, { subTrades: updated });
+                          }}>
+                            <option value="">Assign tech…</option>
+                            {techs.filter((t) => t.status !== "off-duty").map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                          <select style={{ ...S.select, fontSize: 11, padding: "4px 8px" }} value={st.status} onChange={(e) => {
+                            const updated = [...liveWO.subTrades];
+                            updated[i] = { ...updated[i], status: e.target.value };
+                            updateWO(liveWO.id, { subTrades: updated });
+                          }}>
+                            {["Unassigned", "Assigned", "In Progress", "Completed"].map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {isDispatch && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <select style={{ ...S.select, flex: 1 }} value={newSubTrade} onChange={(e) => setNewSubTrade(e.target.value)}>
+                      <option value="">Add sub-trade…</option>
+                      {SUB_TRADE_TYPES.filter((t) => !liveWO.subTrades.some((st) => st.trade === t)).map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button style={S.btn("secondary")} disabled={!newSubTrade} onClick={() => {
+                      const updated = [...liveWO.subTrades, { id: uid(), trade: newSubTrade, status: "Unassigned", techId: null, notes: "" }];
+                      updateWO(liveWO.id, { subTrades: updated });
+                      setNewSubTrade("");
+                      toast("Sub-trade added", newSubTrade);
+                    }}>+ Add</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={sectionStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={fieldLabel}>Photos ({(liveWO.photos || []).length})</div>
+                <label style={{ ...S.btn("secondary"), cursor: "pointer", fontSize: 12, padding: "5px 12px", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  📷 Add Photos
+                  <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => {
+                    const files = Array.from(e.target.files);
+                    files.forEach((file) => {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const photo = { id: uid(), dataUrl: ev.target.result, name: file.name, uploadedBy: user.name, time: Date.now() };
+                        const existingPhotos = workOrders.find((w) => w.id === liveWO.id)?.photos || [];
+                        updateWO(liveWO.id, { photos: [...existingPhotos, photo] });
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                    e.target.value = "";
+                  }} />
+                </label>
+              </div>
+              {(liveWO.photos || []).length === 0 ? (
+                <div style={{ fontSize: 12, color: "#d1d5db" }}>No photos attached yet</div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {(liveWO.photos || []).map((photo) => (
+                    <div key={photo.id} style={{ textAlign: "center" }}>
+                      <img src={photo.dataUrl} alt={photo.name} title={`Uploaded by ${photo.uploadedBy} · ${fmt(photo.time)}`}
+                        style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer", display: "block" }}
+                        onClick={() => window.open(photo.dataUrl, "_blank")} />
+                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 3, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.uploadedBy}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={fieldLabel}>Communications Log ({liveWO.communications.length})</div>
+              {liveWO.communications.length === 0 && <div style={{ fontSize: 12, color: "#d1d5db", padding: "8px 0" }}>No communications yet</div>}
+              {liveWO.communications.map((c) => (
+                <div key={c.id} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid #f9fafb", fontSize: 12 }}>
+                  <span style={{ ...S.mono, color: c.type === "sms" ? "#7a00df" : "#f59e0b", fontWeight: 600, width: 40 }}>{c.type.toUpperCase()}</span>
+                  <span style={{ color: "#94a3b8", width: 50, flexShrink: 0 }}>→ {c.to}</span>
+                  <span style={{ color: "#374151", flex: 1 }}>{c.msg}</span>
+                  <span style={{ color: "#d1d5db", whiteSpace: "nowrap" }}>{fmt(c.time)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Tech Workload Strip ─────────────────────────────────────────────────────
+
+    function TechWorkloadStrip({ techs, expanded, toggle, onTechClick, workOrders }) {
+      const counts = { available: 0, "on-job": 0, "en-route": 0, "off-duty": 0 };
+      techs.forEach((t) => counts[t.status]++);
+
+      return (
+        <div style={{ borderBottom: "1px solid #e5e7eb" }}>
+          <div onClick={toggle} style={{ padding: "10px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: "#fafbfc" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Technician Workload</span>
+              <span style={{ fontSize: 12, transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
+            </div>
+            <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
+              {[["available", "Available"], ["on-job", "On Job"], ["en-route", "En Route"], ["off-duty", "Off Duty"]].map(([k, label]) => (
+                <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Dot color={TECH_STATUS_COLORS[k]} />
+                  <span style={{ fontWeight: 600 }}>{counts[k]}</span> {label}
+                </span>
+              ))}
+            </div>
+          </div>
+          {expanded && (
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr style={{ background: "#f0f1f5" }}>
+                    <th style={S.th}>Name</th>
+                    <th style={S.th}>Specialty</th>
+                    <th style={S.th}>Status</th>
+                    <th style={S.th}>Location</th>
+                    <th style={S.th}>Active Jobs</th>
+                    <th style={S.th}>Capacity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {techs.map((t) => (
+                    <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => onTechClick(t)}>
+                      <td style={{ ...S.td, fontWeight: 600 }}>{t.name}</td>
+                      <td style={S.td}>{t.specialty}</td>
+                      <td style={S.td}><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Dot color={TECH_STATUS_COLORS[t.status]} />{t.status}</span></td>
+                      <td style={S.td}>{t.location}</td>
+                      <td style={S.td}>{t.activeJobs}</td>
+                      <td style={S.td}><CapacityBar used={t.activeJobs} total={t.capacity} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── Tech Detail Panel ───────────────────────────────────────────────────────
+
+    function TechDetailPanel({ tech, workOrders, onClose }) {
+      const myWOs = workOrders.filter((wo) => (wo.techIds || []).includes(tech.id) || wo.subTrades?.some((st) => st.techId === tech.id));
+      const active = myWOs.filter((wo) => ["Assigned", "In Progress"].includes(wo.status));
+      const flagged = myWOs.filter((wo) => wo.status === "Needs Review");
+      const completed = myWOs.filter((wo) => ["Completed", "Closed", "Archived"].includes(wo.status)).slice(0, 5);
+      const renovationTasks = workOrders.filter((wo) => wo.type === "renovation" && wo.subTrades?.some((st) => st.techId === tech.id));
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{tech.name}</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>{tech.specialty} · {tech.location} · {tech.phone}</div>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#94a3b8" }}>✕</button>
+          </div>
+          <div style={{ padding: "12px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: 16 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Dot color={TECH_STATUS_COLORS[tech.status]} /><span style={{ fontSize: 13, fontWeight: 600, textTransform: "capitalize" }}>{tech.status}</span></span>
+            <CapacityBar used={tech.activeJobs} total={tech.capacity} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {[["Active Work Orders", active], ["Flagged for Review", flagged], ["Renovation Tasks", renovationTasks], ["Recent Completions", completed]].map(([title, items]) => (
+              <div key={title} style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", textTransform: "uppercase", marginBottom: 8 }}>{title} ({items.length})</div>
+                {items.length === 0 ? <div style={{ fontSize: 12, color: "#d1d5db" }}>None</div> : items.map((wo) => (
+                  <div key={wo.id} style={{ padding: "8px 10px", background: "#f9fafb", borderRadius: 6, marginBottom: 4, fontSize: 13, display: "flex", justifyContent: "space-between" }}>
+                    <span><span style={{ ...S.mono, fontWeight: 600, color: "#7a00df" }}>{wo.id}</span> — {wo.description?.slice(0, 50)}…</span>
+                    <StatusBadge status={wo.status} />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Team Grid ───────────────────────────────────────────────────────────────
+
+    function TeamGrid({ techs, workOrders, onTechClick }) {
+      return (
+        <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+          {techs.map((t) => {
+            const activeWOs = workOrders.filter((wo) =>
+              ((wo.techIds || []).includes(t.id) || wo.subTrades?.some((st) => st.techId === t.id)) &&
+              ["Assigned", "In Progress"].includes(wo.status)
+            );
+            return (
+              <div key={t.id} onClick={() => onTechClick(t)} style={{ padding: 16, background: "#f9fafb", borderRadius: 10, border: "1px solid #e5e7eb", cursor: "pointer", transition: "all 0.15s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#7a00df"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(122,0,223,0.1)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.boxShadow = "none"; }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</span>
+                    <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 8 }}>{t.phone}</span>
+                  </div>
+                  <Dot color={TECH_STATUS_COLORS[t.status]} size={10} />
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>{t.specialty} · {t.location}</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: activeWOs.length > 0 ? 10 : 0 }}>
+                  <CapacityBar used={activeWOs.length} total={t.capacity} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: activeWOs.length >= t.capacity ? "#ef4444" : "#7a00df", background: activeWOs.length >= t.capacity ? "#fef2f2" : "#f3e8ff", padding: "2px 8px", borderRadius: 99 }}>
+                    {activeWOs.length} WO{activeWOs.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                {activeWOs.length > 0 && (
+                  <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
+                    {activeWOs.slice(0, 3).map((wo) => {
+                      const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+                      return (
+                        <div key={wo.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 3, color: "#374151" }}>
+                          <span style={{ color: wo.status === "In Progress" ? "#7a00df" : "#94a3b8", fontWeight: 600 }}>{wo.status === "In Progress" ? "▶" : "○"}</span>
+                          <span style={{ fontWeight: 600 }}>{prop?.name}</span>
+                          <span style={{ color: "#94a3b8" }}>Unit {wo.unit}</span>
+                          <span style={{ color: "#94a3b8", marginLeft: "auto" }}>{wo.category}</span>
+                        </div>
+                      );
+                    })}
+                    {activeWOs.length > 3 && <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>+{activeWOs.length - 3} more</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── Archive Tab ─────────────────────────────────────────────────────────────
+
+    function ArchiveTab({ workOrders, openDetail }) {
+      const [archiveSearch, setArchiveSearch] = useState("");
+      const [archiveSortCol, setArchiveSortCol] = useState(null);
+      const [archiveSortDir, setArchiveSortDir] = useState("asc");
+      const [archiveColFilters, setArchiveColFilters] = useState({});
+      const setArcFilter = (col, vals) => setArchiveColFilters((prev) => ({ ...prev, [col]: vals }));
+      const onArcSort = (col) => { if (archiveSortCol === col) setArchiveSortDir((d) => d === "asc" ? "desc" : "asc"); else { setArchiveSortCol(col); setArchiveSortDir("asc"); } };
+
+      const searchFiltered = workOrders.filter((wo) => {
+        if (archiveSearch) {
+          const q = archiveSearch.toLowerCase();
+          const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+          const techNames = (wo.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name || "").join(" ");
+          if (!(wo.id.toLowerCase().includes(q) || wo.description?.toLowerCase().includes(q) ||
+            wo.tenantName?.toLowerCase().includes(q) || (wo.unit || "").toLowerCase().includes(q) ||
+            prop?.name.toLowerCase().includes(q) || techNames.toLowerCase().includes(q) ||
+            (wo.category || "").toLowerCase().includes(q) || (wo.createdBy || "").toLowerCase().includes(q) ||
+            (wo.dispatchedBy || "").toLowerCase().includes(q))) return false;
+        }
+        for (const [col, vals] of Object.entries(archiveColFilters)) {
+          if (!vals || vals.length === 0) continue;
+          const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+          const techNames = (wo.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name).filter(Boolean);
+          let woVal;
+          if (col === "property") woVal = prop?.name || "";
+          else if (col === "unit") woVal = wo.unit || "";
+          else if (col === "category") woVal = wo.category || "";
+          else if (col === "createdBy") woVal = wo.createdBy || "";
+          else if (col === "dispatchedBy") woVal = wo.dispatchedBy || "";
+          else if (col === "techs") { if (!vals.some((v) => techNames.includes(v))) return false; continue; }
+          else continue;
+          if (!vals.includes(woVal)) return false;
+        }
+        return true;
+      });
+
+      const grouped = {};
+      searchFiltered.forEach((wo) => {
+        const d = new Date(wo.updated);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const label = d.toLocaleString("en-US", { month: "long", year: "numeric" });
+        if (!grouped[key]) grouped[key] = { label, items: [] };
+        grouped[key].items.push(wo);
+      });
+      const months = Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0]));
+
+      return (
+        <div style={{ padding: 18 }}>
+          <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+            <input style={{ ...S.input, maxWidth: 360 }} placeholder="Search — ID, description, tenant, tech, property, category…" value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} />
+            {archiveSearch && <button onClick={() => setArchiveSearch("")} style={{ ...S.btn("ghost"), padding: "6px 10px", fontSize: 12 }}>Clear</button>}
+            <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: "auto" }}>{searchFiltered.length} record{searchFiltered.length !== 1 ? "s" : ""}</span>
+          </div>
+
+          {months.length === 0 && (
+            <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>
+              No archived work orders{archiveSearch ? ` matching "${archiveSearch}"` : ""}
+            </div>
+          )}
+
+          {months.map(([key, { label, items }], monthIdx) => {
+            const avgRes = items.reduce((sum, i) => sum + (i.updated - i.created), 0) / items.length / day;
+            const cats = {};
+            items.forEach((i) => { cats[i.category] = (cats[i.category] || 0) + 1; });
+            const catSummary = Object.entries(cats).map(([c, n]) => `${c} (${n})`).join(", ");
+            return (
+              <ExpandableSection key={key} title={label} subtitle={`${items.length} WOs · Avg ${avgRes.toFixed(1)}d resolution · ${catSummary}`} defaultOpen={monthIdx === 0}>
+                {(() => {
+                  const sorted = archiveSortCol ? [...items].sort((a, b) => {
+                    const dir = archiveSortDir === "asc" ? 1 : -1;
+                    const pA = PROPERTIES.find((p) => p.id === a.propertyId);
+                    const pB = PROPERTIES.find((p) => p.id === b.propertyId);
+                    const tA = (a.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name).filter(Boolean).join(", ");
+                    const tB = (b.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name).filter(Boolean).join(", ");
+                    switch (archiveSortCol) {
+                      case "id": return dir * a.id.localeCompare(b.id);
+                      case "property": return dir * (pA?.name || "").localeCompare(pB?.name || "");
+                      case "unit": return dir * (a.unit || "").localeCompare(b.unit || "");
+                      case "category": return dir * (a.category || "").localeCompare(b.category || "");
+                      case "createdBy": return dir * (a.createdBy || "").localeCompare(b.createdBy || "");
+                      case "dispatchedBy": return dir * (a.dispatchedBy || "").localeCompare(b.dispatchedBy || "");
+                      case "techs": return dir * tA.localeCompare(tB);
+                      case "arrived": return dir * ((a.arrivedAt || 0) - (b.arrivedAt || 0));
+                      case "completed": return dir * ((a.completedAt || 0) - (b.completedAt || 0));
+                      case "duration": {
+                        const dA = a.completedAt ? a.completedAt - (a.arrivedAt || a.created) : 0;
+                        const dB = b.completedAt ? b.completedAt - (b.arrivedAt || b.created) : 0;
+                        return dir * (dA - dB);
+                      }
+                      case "photos": return dir * ((a.photos || []).length - (b.photos || []).length);
+                      default: return 0;
+                    }
+                  }) : items;
+
+                  const uv = (col) => {
+                    const vals = new Set();
+                    items.forEach((wo) => {
+                      const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+                      if (col === "property") { if (prop) vals.add(prop.name); }
+                      else if (col === "unit") { if (wo.unit) vals.add(wo.unit); }
+                      else if (col === "category") { if (wo.category) vals.add(wo.category); }
+                      else if (col === "createdBy") { if (wo.createdBy) vals.add(wo.createdBy); }
+                      else if (col === "dispatchedBy") { if (wo.dispatchedBy) vals.add(wo.dispatchedBy); }
+                      else if (col === "techs") { (wo.techIds || []).forEach((id) => { const t = TECHS.find((t) => t.id === id); if (t) vals.add(t.name); }); }
+                    });
+                    return [...vals].sort();
+                  };
+
+                  return (
+                    <div style={{ overflowX: "auto", margin: "0 -16px" }}>
+                      <table style={{ minWidth: 900 }}>
+                        <thead>
+                          <tr style={{ background: "#fafbfc" }}>
+                            {[
+                              { col: "id", label: "WO #", filterable: false },
+                              { col: "property", label: "Property", filterable: true },
+                              { col: "unit", label: "Unit", filterable: true },
+                              { col: "category", label: "Category", filterable: true },
+                              { col: "createdBy", label: "Created By", filterable: true },
+                              { col: "dispatchedBy", label: "Dispatched By", filterable: true },
+                              { col: "techs", label: "Tech(s)", filterable: true },
+                              { col: "arrived", label: "Arrived", filterable: false },
+                              { col: "completed", label: "Completed", filterable: false },
+                              { col: "duration", label: "Duration", filterable: false },
+                              { col: "photos", label: "Photos", filterable: false },
+                            ].map(({ col, label, filterable }) => (
+                              <SortFilterTh key={col} col={col} label={label} sortCol={archiveSortCol} sortDir={archiveSortDir} onSort={onArcSort} colFilters={archiveColFilters} uniqueVals={filterable ? uv(col) : null} onFilter={setArcFilter} />
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sorted.map((wo) => {
+                            const prop = PROPERTIES.find((p) => p.id === wo.propertyId);
+                            const allTechNames = [
+                              ...(wo.techIds || []).map((id) => TECHS.find((t) => t.id === id)?.name),
+                              ...(wo.subTrades || []).map((st) => TECHS.find((t) => t.id === st.techId)?.name),
+                            ].filter((n, i, arr) => n && arr.indexOf(n) === i);
+                            const durationMs = wo.completedAt ? wo.completedAt - (wo.arrivedAt || wo.created) : null;
+                            const duration = durationMs != null
+                              ? durationMs < day ? `${Math.round(durationMs / 3600000)}h` : `${(durationMs / day).toFixed(1)}d`
+                              : "—";
+                            const photoCount = (wo.photos || []).length;
+                            return (
+                              <tr key={wo.id} onClick={() => openDetail(wo)} style={{ cursor: "pointer", transition: "background 0.1s" }}>
+                                <td style={{ ...S.td, fontWeight: 700, color: "#7a00df", fontSize: 12 }}>{wo.id}</td>
+                                <td style={{ ...S.td, fontWeight: 500 }}>{prop?.name || "—"}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>{wo.unit || "—"}</td>
+                                <td style={S.td}>{wo.category || "—"}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>{wo.createdBy || <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>{wo.dispatchedBy || <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>{allTechNames.length ? <span style={{ fontWeight: 500 }}>{allTechNames.join(", ")}</span> : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, color: "#64748b", fontSize: 12 }}>{wo.arrivedAt ? fmt(wo.arrivedAt) : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, color: "#64748b", fontSize: 12 }}>{wo.completedAt ? fmt(wo.completedAt) : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                                <td style={{ ...S.td, fontSize: 12, color: "#64748b" }}>{duration}</td>
+                                <td style={{ ...S.td, fontSize: 12 }}>{photoCount > 0 ? <span style={{ color: "#7a00df", fontWeight: 600 }}>📷 {photoCount}</span> : <span style={{ color: "#d1d5db" }}>—</span>}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </ExpandableSection>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function ExpandableSection({ title, subtitle, defaultOpen = false, children }) {
+      const [open, setOpen] = useState(defaultOpen);
+      return (
+        <div style={{ marginBottom: 12, background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+          <div onClick={() => setOpen(!open)} style={{ padding: "12px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
+              {subtitle && <span style={{ fontSize: 12, color: "#94a3b8", marginLeft: 10 }}>{subtitle}</span>}
+            </div>
+            <span style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "0.2s" }}>▼</span>
+          </div>
+          {open && <div style={{ padding: "0 16px 16px" }}>{children}</div>}
+        </div>
+      );
+    }
+
+    // ─── Tenant View ─────────────────────────────────────────────────────────────
+
+    function TenantView({ user, workOrders, toast, setWorkOrders }) {
+      const [showForm, setShowForm] = useState(false);
+      const [cat, setCat] = useState("Plumbing");
+      const [desc, setDesc] = useState("");
+      const [urgent, setUrgent] = useState(false);
+
+      const myWOs = workOrders.filter((wo) => wo.tenantId === user.id);
+
+      const submit = () => {
+        if (!desc.trim()) { toast("Missing info", "Please describe the issue", "warn"); return; }
+        const wo = {
+          id: `WO-${1100 + Math.floor(Math.random() * 900)}`,
+          type: "repair", propertyId: user.propertyId, unit: user.unit, category: cat,
+          description: desc, urgency: urgent, status: "Unassigned", priority: urgent ? "High" : "Medium",
+          techId: null, tenantId: user.id, tenantName: user.name,
+          created: Date.now(), updated: Date.now(), communications: [], notes: "", completionNotes: "", closedBy: null, closedNote: "",
+        };
+        setWorkOrders((p) => [wo, ...p]);
+        toast("Submitted!", `Request ${wo.id} created`, "info");
+        setShowForm(false); setDesc(""); setUrgent(false);
+      };
+
+      return (
+        <div style={{ ...S.page, maxWidth: 700 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 0 12px" }}>
+            <div style={S.h2}>My Maintenance Requests</div>
+            <button style={S.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Request</button>
+          </div>
+
+          {showForm && (
+            <div style={{ ...S.card, padding: 20, marginBottom: 16 }}>
+              <div style={{ marginBottom: 10 }}>
+                <div style={S.label}>Category</div>
+                <select style={{ ...S.select, width: "100%", marginTop: 4 }} value={cat} onChange={(e) => setCat(e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={S.label}>Description</div>
+                <textarea style={{ ...S.textarea, marginTop: 4 }} rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Describe the issue in detail…" />
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} /> Mark as urgent (safety concern, water leak, etc.)
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={S.btn("primary")} onClick={submit}>Submit Request</button>
+                <button style={S.btn("secondary")} onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {myWOs.length === 0 ? (
+            <div style={{ ...S.card, padding: 40, textAlign: "center", color: "#94a3b8" }}>No requests yet. Submit one above!</div>
+          ) : myWOs.map((wo) => (
+            <div key={wo.id} style={{ ...S.card, padding: 16, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ ...S.mono, fontWeight: 600, color: "#7a00df" }}>{wo.id}</span>
+                  <span style={{ fontSize: 12, color: "#64748b" }}>{wo.category}</span>
+                </div>
+                <StatusBadge status={wo.status} />
+              </div>
+              <div style={{ fontSize: 13, marginBottom: 8, color: "#374151" }}>{wo.description}</div>
+              <div style={{ borderLeft: "2px solid #e5e7eb", marginLeft: 6, paddingLeft: 14 }}>
+                <TimelineItem label="Submitted" time={wo.created} done />
+                <TimelineItem label="Assigned" time={wo.status !== "Unassigned" ? wo.updated : null} done={wo.status !== "Unassigned"} />
+                <TimelineItem label="In Progress" time={wo.status === "In Progress" ? wo.updated : null} done={["In Progress", "Completed", "Closed", "Archived"].includes(wo.status)} />
+                <TimelineItem label="Completed" time={["Completed", "Closed", "Archived"].includes(wo.status) ? wo.updated : null} done={["Completed", "Closed", "Archived"].includes(wo.status)} last />
+              </div>
+              {wo.communications.filter((c) => c.to === "tenant").length > 0 && (
+                <div style={{ marginTop: 10, padding: "8px 10px", background: "#f9fafb", borderRadius: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 4 }}>Messages</div>
+                  {wo.communications.filter((c) => c.to === "tenant").map((c) => (
+                    <div key={c.id} style={{ fontSize: 12, color: "#374151", padding: "3px 0" }}>
+                      <span style={{ ...S.mono, color: "#7a00df", fontSize: 10, marginRight: 6 }}>{c.type.toUpperCase()}</span>
+                      {c.msg} <span style={{ color: "#d1d5db", marginLeft: 4 }}>{fmt(c.time)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function TimelineItem({ label, time, done, last }) {
+      return (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", paddingBottom: last ? 0 : 8, position: "relative" }}>
+          <div style={{ position: "absolute", left: -20, top: 2, width: 10, height: 10, borderRadius: "50%", background: done ? "#7a00df" : "#e5e7eb", border: "2px solid #fff" }} />
+          <div>
+            <span style={{ fontSize: 12, fontWeight: done ? 600 : 400, color: done ? "#374151" : "#d1d5db" }}>{label}</span>
+            {time && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 6 }}>{fmt(time)}</span>}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Tech View ───────────────────────────────────────────────────────────────
+
+    function TechView({ user, workOrders, techs, startWork, completeWork, flagReview, stopWork, updateWO, toast }) {
+      const [selectedWO, setSelectedWO] = useState(null);
+      const [flagNote, setFlagNote] = useState("");
+      const [compNote, setCompNote] = useState("");
+
+      const tech = techs.find((t) => t.id === user.techId);
+      const myWOs = workOrders.filter((wo) => {
+        if ((wo.techIds || []).includes(user.techId)) return true;
+        if (wo.subTrades?.some((st) => st.techId === user.techId)) return true;
+        return false;
+      }).filter((wo) => !["Archived", "Closed"].includes(wo.status));
+
+      const sorted = [...myWOs].sort((a, b) => {
+        const priOrd = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+        return (priOrd[a.priority] ?? 9) - (priOrd[b.priority] ?? 9);
+      });
+
+      return (
+        <div style={{ ...S.page, maxWidth: 500, padding: "0 12px 24px" }}>
+          <div style={{ padding: "16px 0 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={S.h2}>My Jobs</div>
+              <div style={{ fontSize: 12, color: "#94a3b8" }}>{tech?.name} · {tech?.specialty}</div>
+            </div>
+            <span style={{ ...S.badge({ bg: TECH_STATUS_COLORS[tech?.status] + "22", text: TECH_STATUS_COLORS[tech?.status] }), textTransform: "capitalize" }}>{tech?.status}</span>
+          </div>
+
+          {sorted.map((wo) => (
+            <div key={wo.id} style={{ ...S.card, marginBottom: 10, overflow: "hidden" }}>
+              <div onClick={() => setSelectedWO(selectedWO === wo.id ? null : wo.id)} style={{ padding: "14px 16px", cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ ...S.mono, fontWeight: 700, color: "#7a00df" }}>{wo.id}</span>
+                    <PriorityBadge priority={wo.priority} />
+                  </div>
+                  <StatusBadge status={wo.status} />
+                </div>
+                <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{wo.description?.slice(0, 80)}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>{PROPERTIES.find((p) => p.id === wo.propertyId)?.name} · Unit {wo.unit} · {wo.category}</div>
+              </div>
+
+              {selectedWO === wo.id && (
+                <div style={{ padding: "0 16px 16px", borderTop: "1px solid #f3f4f6" }}>
+                  <div style={{ padding: "12px 0" }}>
+                    <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>{wo.description}</div>
+                    {wo.notes && <div style={{ fontSize: 12, background: "#fffbeb", padding: 8, borderRadius: 6, marginBottom: 10, border: "1px solid #fde68a" }}>{wo.notes}</div>}
+
+                    {wo.type === "renovation" && wo.subTrades?.filter((st) => st.techId === user.techId).map((st) => (
+                      <div key={st.id} style={{ padding: 8, background: "#f0f1f5", borderRadius: 6, marginBottom: 6, fontSize: 12 }}>
+                        <strong>{st.trade}</strong> — <StatusBadge status={st.status} />
+                        {st.notes && <div style={{ marginTop: 4, color: "#64748b" }}>{st.notes}</div>}
+                      </div>
+                    ))}
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      {wo.status === "Assigned" && <button style={S.btn("primary")} onClick={() => startWork(wo.id)}>▶ Start Work</button>}
+                      {wo.status === "In Progress" && (
+                        <>
+                          <input style={{ ...S.input, maxWidth: 200 }} placeholder="Completion notes…" value={compNote} onChange={(e) => setCompNote(e.target.value)} />
+                          <button style={S.btn("success")} onClick={() => { if (compNote.trim()) { completeWork(wo.id, compNote); setCompNote(""); } else toast("Notes required", "", "warn"); }}>✓ Complete</button>
+                          <button style={S.btn("secondary")} onClick={() => stopWork(wo.id)}>⏹ Stop</button>
+                        </>
+                      )}
+                      {!["Completed", "Needs Review"].includes(wo.status) && (
+                        <>
+                          <input style={{ ...S.input, maxWidth: 180 }} placeholder="Flag note…" value={flagNote} onChange={(e) => setFlagNote(e.target.value)} />
+                          <button style={S.btn("danger")} onClick={() => { if (flagNote.trim()) { flagReview(wo.id, flagNote); setFlagNote(""); } else toast("Note required", "", "warn"); }}>Flag</button>
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 10, marginTop: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>Photos ({(wo.photos || []).length})</span>
+                        <label style={{ fontSize: 12, color: "#7a00df", cursor: "pointer", fontWeight: 500 }}>
+                          📷 Add
+                          <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => {
+                            const files = Array.from(e.target.files);
+                            files.forEach((file) => {
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const photo = { id: uid(), dataUrl: ev.target.result, name: file.name, uploadedBy: user.name, time: Date.now() };
+                                const existingPhotos = workOrders.find((w) => w.id === wo.id)?.photos || [];
+                                updateWO(wo.id, { photos: [...existingPhotos, photo] });
+                              };
+                              reader.readAsDataURL(file);
+                            });
+                            e.target.value = "";
+                          }} />
+                        </label>
+                      </div>
+                      {(wo.photos || []).length === 0 ? (
+                        <div style={{ fontSize: 11, color: "#d1d5db" }}>No photos yet — tap Add to attach job photos</div>
+                      ) : (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {(wo.photos || []).map((photo) => (
+                            <img key={photo.id} src={photo.dataUrl} alt={photo.name} title={`${photo.uploadedBy} · ${fmt(photo.time)}`}
+                              style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: "1px solid #e5e7eb", cursor: "pointer" }}
+                              onClick={() => window.open(photo.dataUrl, "_blank")} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {sorted.length === 0 && <div style={{ ...S.card, padding: 40, textAlign: "center", color: "#94a3b8" }}>No active jobs. You're all caught up!</div>}
+        </div>
+      );
+    }
+
+    // ─── Mount ───────────────────────────────────────────────────────────────────
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<ROMrepair />);
+  </script>
+</body>
+</html>
